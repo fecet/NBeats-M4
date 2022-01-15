@@ -10,14 +10,34 @@ import keras_tuner as kt
 import numpy as np
 import pandas as pd
 import tensorflow as tf
-from tqdm.notebook import tqdm
 from hypernbeat import HyperNBeats,M4Meta
 from loss import LOSSES
+
+# %%
+
+def isnotebook():
+    try:
+        shell = get_ipython().__class__.__name__
+        if shell == 'ZMQInteractiveShell':
+            return True   # Jupyter notebook or qtconsole
+        elif shell == 'TerminalInteractiveShell':
+            return False  # Terminal running IPython
+        else:
+            return False  # Other type (?)
+    except NameError:
+        return False  
+if isnotebook():
+    from tqdm.notebook import tqdm
+    os.environ["CUDA_VISIBLE_DEVICES"]="0" 
+else:
+    from tqdm import tqdm
+    os.environ["CUDA_VISIBLE_DEVICES"]="1" 
+# %%
+
 # %%
 
 tf.config.threading.set_inter_op_parallelism_threads(8)
 DATA_PATH=Path("./data/Dataset")
-os.environ["CUDA_VISIBLE_DEVICES"]="0"
 warnings.filterwarnings("ignore")
 
 # %%

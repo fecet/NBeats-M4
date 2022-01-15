@@ -175,6 +175,7 @@ class NBeatsNet:
                                                       'forecast_length': self.forecast_length})
         else:  # 'seasonality'
             if self.nb_harmonics:
+                theta_size=4*int(self.nb_harmonics/2*self.forecast_length-self.nb_harmonics+1)
                 theta_b = reg(Dense(theta_size, activation='linear', use_bias=False, name=n('theta_b')))
             else:
                 theta_b = reg(Dense(self.forecast_length, activation='linear', use_bias=False, name=n('theta_b')))
