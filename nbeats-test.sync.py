@@ -188,8 +188,8 @@ if __name__ == "__main__":
     for freq,lookback,loss in product(["Yearly"],[2,3,4,5,6,7],LOSSES.keys()):
         # ensemble_member(freq,lookback,loss,model_type="generic")
         ensemble_member(freq,lookback,loss)
-        evaluater=Evaluater(freq)
-        results=interpretable_model(freq)
+    evaluater=Evaluater(freq)
+    results=interpretable_model(freq)
 
-        evaluater(results)
+    evaluater(results)
     
