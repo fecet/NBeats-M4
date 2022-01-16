@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 import tensorflow as tf
 from collections.abc import Iterable
-from hypernbeat import HyperNBeats,M4Meta
+from hypernbeat import HyperNBeats
 from loss import LOSSES
 from data import M4Meta,read_data
 
