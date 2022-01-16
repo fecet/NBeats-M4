@@ -1,58 +1,12 @@
 import keras_tuner as kt
 import tensorflow as tf
-from pathlib import Path
 import numpy as np
 import tensorflow_io as tfio
 import pandas as pd
-from collections import OrderedDict
-from dataclasses import dataclass
 
 from model import NBeatsNet
 from loss import LOSSES
-
-DATA_PATH=Path("./data/Dataset")
-
-info_df=pd.read_csv(DATA_PATH/'M4-info.csv')
-
-@dataclass()
-class M4Meta:
-    ids=info_df.M4id.values
-    groups=info_df.SP.values
-    seasonal_patterns = ['Yearly', 'Quarterly', 'Monthly', 'Weekly', 'Daily', 'Hourly']
-    horizons = [6, 8, 18, 13, 14, 48]
-    frequencies = [1, 4, 12, 1, 1, 24]
-    horizons_map = {
-        'Yearly': 6,
-        'Quarterly': 8,
-        'Monthly': 18,
-        'Weekly': 13,
-        'Daily': 14,
-        'Hourly': 48
-    }
-    frequency_map = {
-        'Yearly': 1,
-        'Quarterly': 4,
-        'Monthly': 12,
-        'Weekly': 1,
-        'Daily': 1,
-        'Hourly': 24
-    }
-    history_size = {
-    'Yearly': 1.5,
-    'Quarterly': 1.5,
-    'Monthly': 1.5,
-    'Weekly': 10,
-    'Daily': 10,
-    'Hourly': 10
-}
-    iterations = {
-    'Yearly': 15000,
-    'Quarterly': 15000,
-    'Monthly': 15000,
-    'Weekly': 5000,
-    'Daily': 5000,
-    'Hourly': 5000
-}
+from data import M4Meta
 
 def windowed_time_series(timeseries,insample_size,outsample_size,window_sampling_limit):
     insamples=[]
@@ -62,13 +16,13 @@ def windowed_time_series(timeseries,insample_size,outsample_size,window_sampling
         insample = np.zeros((gen_size,insample_size),dtype=np.float32)
         outsample = np.zeros((gen_size,outsample_size),dtype=np.float32)
         for idx,cut_point in enumerate(np.arange(
-                        start=max(1, len(sampled_timeseries) - window_sampling_limit),
-                        stop=len(sampled_timeseries),
-                        dtype=int)):
+            start=max(1, len(sampled_timeseries) - window_sampling_limit),
+            stop=len(sampled_timeseries),
+            dtype=int)):
             insample_window = sampled_timeseries[max(0, cut_point - insample_size):cut_point]
             insample[idx,-len(insample_window):] = insample_window
             outsample_window = sampled_timeseries[
-                               cut_point:min(len(sampled_timeseries), cut_point + outsample_size)]
+            cut_point:min(len(sampled_timeseries), cut_point + outsample_size)]
             outsample[idx,:len(outsample_window)] = outsample_window
         insamples.append(insample)
         outsamples.append(outsample)
@@ -125,22 +79,38 @@ class HyperNBeats(kt.HyperModel):
         self.outsample_size=self.horizon
         loss_fn=hp.Choice("loss_fn",["smape","mape","mase"])
         self.use_mase=(loss_fn=="mase")
-        net = NBeatsNet(
-            # stack_types=(NBeatsNet.GENERIC_BLOCK, NBeatsNet.GENERIC_BLOCK),
-            stack_types=(NBeatsNet.TREND_BLOCK, NBeatsNet.SEASONALITY_BLOCK),
-            nb_blocks_per_stack=hp.Int("nb_blocks_per_stack",min_value=3,max_value=5),
-            forecast_length=self.outsample_size,
-            backcast_length=self.insample_size,
+        model_type=hp.Choice("model_type",["interpretable","generic"])
+        if model_type=="generic":
+            stacks_num=hp.Int("stacks_num", 10, 30)
+            stacks=[NBeatsNet.GENERIC_BLOCK]*stacks_num
+            thetas_dim=[32]*stacks_num
+            hidden_layer_units=[512]*stacks_num
+            share_weights_in_stack=False
+            nb_blocks_per_stack=1
+        else:
+            stacks=(NBeatsNet.TREND_BLOCK, NBeatsNet.SEASONALITY_BLOCK)
+            thetas_dim=(hp.Int("degree_of_polynomial",min_value=2,max_value=4)+1,4)
             hidden_layer_units=(
                 int(2**hp.Int("trend_layer_units_power",min_value=7,max_value=11,step=1)),
                 int(2**hp.Int("season_layer_units_power",min_value=8,max_value=11,step=1)),
-            ),
-            thetas_dim=(hp.Int("degree_of_polynomial",min_value=2,max_value=4)+1,4),
-            share_weights_in_stack=True,
+            )
+            share_weights_in_stack=True
+            nb_blocks_per_stack=hp.Int("nb_blocks_per_stack",min_value=3,max_value=5)
+        # print(hidden_layer_units)
+
+        net = NBeatsNet(
+            # stack_types=(NBeatsNet.GENERIC_BLOCK, NBeatsNet.GENERIC_BLOCK),
+            stack_types=stacks,
+            nb_blocks_per_stack=nb_blocks_per_stack,
+            forecast_length=self.outsample_size,
+            backcast_length=self.insample_size,
+            hidden_layer_units=hidden_layer_units,
+            thetas_dim=thetas_dim,
+            share_weights_in_stack=share_weights_in_stack,
             nb_harmonics=hp.Int("nb_harmonics",min_value=0,max_value=2),
             use_mase=self.use_mase,
             mase_frequency=self.frequency
-           )
+        )
         lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(
             hp.Float("init_lr",min_value=1e-5,max_value=1e-3,sampling="log"),
             # 1e-3,
@@ -171,14 +141,14 @@ class HyperNBeats(kt.HyperModel):
         train_ds=generate_dataset(x_train, y_train,batch_size,shuffle=(not self.use_mase),use_mase=self.use_mase)
         test_ds=generate_dataset(x_test, y_test,batch_size,use_mase=self.use_mase)
         return train_ds,test_ds
-    
+
     def fit(self, hp,model,x,y,**kwargs):
 
         train_ds,test_ds=self.dataset_for_training(hp,x,y)
-
 
         return model.fit(
             x=train_ds,
             validation_data=test_ds,
             epochs=hp.Int("epochs",20,300),
-            **kwargs)
+            **kwargs
+        )

@@ -1,17 +1,17 @@
 # %%
-
-from functools import partial
 from itertools import product
 import os
 from pathlib import Path
 import warnings
-import fire
 import keras_tuner as kt
 import numpy as np
 import pandas as pd
 import tensorflow as tf
+from collections.abc import Iterable
 from hypernbeat import HyperNBeats,M4Meta
 from loss import LOSSES
+from data import M4Meta,read_data
+
 
 # %%
 
@@ -34,10 +34,7 @@ else:
     os.environ["CUDA_VISIBLE_DEVICES"]="1" 
 # %%
 
-# %%
-
 tf.config.threading.set_inter_op_parallelism_threads(8)
-DATA_PATH=Path("./data/Dataset")
 warnings.filterwarnings("ignore")
 
 # %%
@@ -57,48 +54,34 @@ def last_insample_window(timeseries, insample_size):
 def predict_m4_timeseries(timeseries, targets, model, loss):
     if loss=="mase":
         insample_size=model.input_shape[0][1]
-        # outsample_size=M4Meta.horizons_map[freq]
         x_test=last_insample_window(timeseries,insample_size)
-        # y_test=targets
         y_pred=model.predict((x_test,targets)).squeeze()
     else:
         insample_size=model.input_shape[1]
-        # outsample_size=M4Meta.horizons_map[freq]
         x_test=last_insample_window(timeseries,insample_size)
-        # y_test=targets
         y_pred=model.predict(x_test).squeeze()
-    # preds.append(y_pred)
-    # score=LOSSES['smape'](targets, y_pred)
-    # if score<20.0:
     return y_pred
 
-def read_data(freq):
-    filename_train = DATA_PATH/f'Train/{freq}-train.csv'
-    filename_test  = DATA_PATH/f'Test/{freq}-test.csv'
-    df=pd.read_csv(filename_train)
-    tss=df.drop('V1',axis=1).values.copy(order='C').astype(np.float32)
-    def dropna(x):
-        return x[~np.isnan(x)]
-
-    timeseries=[dropna(ts) for ts in tss]
-    df=pd.read_csv(filename_test)
-    targets=df.drop('V1',axis=1).values.copy(order='C').astype(np.float32)
-    return timeseries,targets
 
 # %%
 
-def ensemble_member(freq,lookback,loss,overwrite=False):
+def ensemble_member(freq,lookback,loss,model_type="interpretable",overwrite=False):
 
     timeseries,targets=read_data(freq)
 
     history_size=M4Meta.history_size[freq]
     batch_size_power=10
 
-    project_name=f"{freq}_{lookback}_{loss}"
+    if model_type=="interpretable":
+        project_name=f"{freq}_{lookback}_{loss}"
+    else:
+        project_name=f"{model_type}_{freq}_{lookback}_{loss}"
+         
 
     print(project_name)
 
     hp=kt.HyperParameters()
+    hp.Fixed("model_type", model_type)
     hp.Fixed("lookback",lookback)
     hp.Fixed("nb_blocks_per_stack",3)
     hp.Fixed("trend_layer_units_power",8)
@@ -112,12 +95,13 @@ def ensemble_member(freq,lookback,loss,overwrite=False):
     hp.Fixed("nb_harmonics", 1)
     hp.Fixed("epochs", 100)
     hp.Fixed("val_size", 0.1)
+    hp.Fixed("stacks_num", 15)
 
     tuner = kt.RandomSearch(
         HyperNBeats(freq),
         hyperparameters=hp,
         objective=kt.Objective("val_loss", direction="min"),
-        max_trials=40,
+        max_trials=15,
         overwrite=overwrite,
         directory="kt",
         project_name=project_name,
@@ -131,6 +115,7 @@ def ensemble_member(freq,lookback,loss,overwrite=False):
 
     logdir = Path("logs")/"keras_tuner_log"
     tensorboard_callback = tf.keras.callbacks.TensorBoard(logdir, histogram_freq=1)
+
     tuner.search(timeseries, targets, 
                 # epochs=100, 
                 # steps_per_epoch=M4Meta.iterations[freq] // 100,
@@ -138,39 +123,73 @@ def ensemble_member(freq,lookback,loss,overwrite=False):
                 callbacks=[es_callback,tensorboard_callback]
                 )
 
-    # sorted_preds=sorted(preds,key=lambda x:smape_loss(targets, x))
     evaluate_path=Path('./nbeats_result')/project_name
     evaluate_path.mkdir(exist_ok=True,parents=True)
 
-    # score=tuner.oracle.get_best_trials(1)[0].score
-    # print(f"{project_name}:{score}")
-
-    for i,model in tqdm(enumerate(tuner.get_best_models(num_models=40))):
+    print("Record pred")
+    for i,model in tqdm(enumerate(tuner.get_best_models(num_models=15))):
         y_pred=predict_m4_timeseries(timeseries, targets, model, loss) 
         np.save(evaluate_path/f"{i}.npy",y_pred)
 
-    # print(tuner.results_summary())
 
     return tuner
 
 # %%
+class Evaluater(object):
 
-def evaluate(results,freq="Yearly"):
-    timeseries,targets=read_data(freq)
-    preds=[np.load(fp) for fp in results]
-    print(f"Ensembling from {len(preds)} models:")
-    smape_loss=LOSSES['smape']
-    print(f"Median ensemble: {smape_loss(targets, np.median(np.stack(preds),axis=0))}")
-    print(f"Mean ensemble: {smape_loss(targets, np.mean(np.stack(preds),axis=0))}")
+    def __init__(self,freq):
+        self._freq = freq
+        self.timeseries,self.targets=read_data(freq)
+        self.eval_fn=LOSSES['smape']
+
+    def ensemble_results(self,results):
+        if not isinstance(results, Iterable):
+            results=[results]
+        preds=[np.load(fp) for fp in results]
+        print(f"Ensembling from {len(preds)} models:")
+        # mean_ensemble=np.mean(np.stack(preds),axis=0)
+        median_ensemble=np.median(np.stack(preds),axis=0)
+        return median_ensemble
+
+    def __call__(self,results):
+        y_pred=self.ensemble_results(results)
+        median_score=self.eval_fn(self.targets, y_pred).numpy()
+        print(f"Median ensemble: {median_score}")
+        return median_score
+
+# %%
+
+def generic_model(freq,repeat=10):
+    results=[]
+    for lookback,loss in product([2,3,4,5,6,7],LOSSES.keys()):
+        project_name=f"generic_{freq}_{lookback}_{loss}"
+        member_results=list(Path('./nbeats_result').glob(f"{project_name}/*.npy"))
+        select_results=np.random.choice(member_results,size=repeat) # For accurate reporduction
+        results.extend(select_results)
+    return results
+
+def interpretable_model(freq,repeat=10):
+    results=[]
+    for lookback,loss in product([2,3,4,5,6,7],LOSSES.keys()):
+        project_name=f"{freq}_{lookback}_{loss}"
+        member_results=list(Path('./nbeats_result').glob(f"{project_name}/*.npy"))
+        select_results=np.random.choice(member_results,size=repeat) # For accurate reporduction
+        results.extend(select_results)
+    return results
+
 
 
 # %%
 
 if __name__ == "__main__":
-
     # freq="Yearly"
     # results=Path('./nbeats_result').glob(f"{freq}_[234567]_*ma?e/[0-9].npy")
     # evaluate(results,freq)
-
     for freq,lookback,loss in product(["Yearly"],[2,3,4,5,6,7],LOSSES.keys()):
+        # ensemble_member(freq,lookback,loss,model_type="generic")
         ensemble_member(freq,lookback,loss)
+        evaluater=Evaluater(freq)
+        results=interpretable_model(freq)
+
+        evaluater(results)
+    

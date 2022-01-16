@@ -24,7 +24,6 @@ def smape_loss(y_true,y_pred):
     :param mask: 0/1 mask. Shape: batch, time
     :return: Loss value
     """
-    # mask=tf.where(y_true,1.,0.)
     mask=tf.cast(y_true,tf.bool)
     mask=tf.cast(mask,tf.float32)
     sym_sum= tf.abs(y_true)+tf.abs(y_pred) 
@@ -33,7 +32,7 @@ def smape_loss(y_true,y_pred):
     # weights=tf.stop_gradient(weights)
     res=tf.abs(y_pred - y_true)*weights * mask
     nonzero=tf.math.count_nonzero(res)
-    nonzero=tf.cast(nonzero,tf.float32)     
+    nonzero=tf.cast(nonzero,tf.float32)
 
     return 200 * tf.math.reduce_sum(res)/nonzero
 
