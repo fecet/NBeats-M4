@@ -29,7 +29,7 @@ Link to [[paper](https://arxiv.org/abs/1905.10437)].
 
 ## Results
 
-There is only results for Yearly dataset and interpretable model at the moment. Check
+There is only results for Yearly dataset and interpretable model at the moment. Check author's results [here](https://github.com/ElementAI/N-BEATS/blob/master/notebooks/M4.ipynb)
 
 ## Credit:
 
