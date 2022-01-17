@@ -24,7 +24,8 @@ Link to [[paper](https://arxiv.org/abs/1905.10437)].
         ├── Weekly-train.csv
         └── Yearly-train.csv
     ```
-- run the .ipynb file.
+- Install missing packages like `tensorflow_io`
+- Run the [.ipynb](https://github.com/fecet/NBeats-M4/blob/master/nbeats-test.sync.ipynb) file.
 
 
 ## Results
