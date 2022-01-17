@@ -8,11 +8,13 @@ def mape_loss(y_true,y_pred):
     :param mask: 0/1 mask. Shape: batch, time
     :return: Loss value
     """
-    # mask=tf.cast(~tnp.isnan(y_true),tf.float32)
     condition=tf.cast(y_true,tf.bool)
     weights=tf.where(condition,1./y_true,.0)
     # weights = 1/y_true*mask
-    # return 200 * tnp.nanmean(tf.abs(y_pred - y_true)*weights )
+    res=tf.abs(y_pred- y_true)*weights
+    nonzero=tf.math.count_nonzero(res)
+    nonzero=tf.cast(nonzero,tf.float32)
+    return 100 * tf.math.reduce_sum(res)/nonzero
 
 
 def smape_loss(y_true,y_pred):

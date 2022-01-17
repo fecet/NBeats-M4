@@ -186,10 +186,10 @@ if __name__ == "__main__":
     # results=Path('./nbeats_result').glob(f"{freq}_[234567]_*ma?e/[0-9].npy")
     # evaluate(results,freq)
     for freq,lookback,loss in product(["Yearly"],[2,3,4,5,6,7],LOSSES.keys()):
-        # ensemble_member(freq,lookback,loss,model_type="generic")
-        ensemble_member(freq,lookback,loss)
-    evaluater=Evaluater(freq)
-    results=interpretable_model(freq)
-
-    evaluater(results)
+        ensemble_member(freq,lookback,loss,model_type="generic")
+        # ensemble_member(freq,lookback,loss)
+#     evaluater=Evaluater(freq)
+#     results=interpretable_model(freq)
+# 
+#     evaluater(results)
     
