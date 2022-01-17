@@ -1,20 +1,5 @@
 # %%
-from itertools import product
 import os
-from pathlib import Path
-import warnings
-import keras_tuner as kt
-import numpy as np
-import pandas as pd
-import tensorflow as tf
-from collections.abc import Iterable
-from hypernbeat import HyperNBeats
-from loss import LOSSES
-from data import M4Meta,read_data
-
-
-# %%
-
 def isnotebook():
     try:
         shell = get_ipython().__class__.__name__
@@ -29,13 +14,31 @@ def isnotebook():
 if isnotebook():
     from tqdm.notebook import tqdm
     os.environ["CUDA_VISIBLE_DEVICES"]="0" 
+    # os.environ["CUDA_VISIBLE_DEVICES"]="0,1,2,3" 
 else:
     from tqdm import tqdm
     os.environ["CUDA_VISIBLE_DEVICES"]="1" 
-# %%
 
+# %%
+from itertools import product
+from pathlib import Path
+import warnings
+import keras_tuner as kt
+import numpy as np
+import pandas as pd
+import tensorflow as tf
+from collections.abc import Iterable
+from hypernbeat import HyperNBeats
+from loss import LOSSES
+from data import M4Meta,read_data
 tf.config.threading.set_inter_op_parallelism_threads(8)
 warnings.filterwarnings("ignore")
+
+# %%
+
+strategy = tf.distribute.MirroredStrategy()
+print('Number of devices: {}'.format(strategy.num_replicas_in_sync))
+
 
 # %%
 
@@ -65,12 +68,12 @@ def predict_m4_timeseries(timeseries, targets, model, loss):
 
 # %%
 
-def ensemble_member(freq,lookback,loss,model_type="interpretable",overwrite=False):
+def ensemble_member(freq,lookback,loss,model_type="interpretable",overwrite=False,parallel=False):
 
     timeseries,targets=read_data(freq)
 
     history_size=M4Meta.history_size[freq]
-    batch_size_power=10
+    batch_size_power=14
 
     if model_type=="interpretable":
         project_name=f"{freq}_{lookback}_{loss}"
@@ -96,6 +99,7 @@ def ensemble_member(freq,lookback,loss,model_type="interpretable",overwrite=Fals
     hp.Fixed("epochs", 100)
     hp.Fixed("val_size", 0.1)
     hp.Fixed("stacks_num", 15)
+    hp.Fixed("parallel", parallel)
 
     tuner = kt.RandomSearch(
         HyperNBeats(freq),
@@ -126,7 +130,7 @@ def ensemble_member(freq,lookback,loss,model_type="interpretable",overwrite=Fals
     evaluate_path=Path('./nbeats_result')/project_name
     evaluate_path.mkdir(exist_ok=True,parents=True)
 
-    print("Record pred")
+    print("Recording pred...")
     for i,model in tqdm(enumerate(tuner.get_best_models(num_models=15))):
         y_pred=predict_m4_timeseries(timeseries, targets, model, loss) 
         np.save(evaluate_path/f"{i}.npy",y_pred)
@@ -178,6 +182,8 @@ def interpretable_model(freq,repeat=10):
     return results
 
 
+# %%
+
 
 # %%
 
@@ -193,3 +199,7 @@ if __name__ == "__main__":
 # 
 #     evaluater(results)
     
+
+# %%
+
+

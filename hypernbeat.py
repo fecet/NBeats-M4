@@ -74,6 +74,7 @@ class HyperNBeats(kt.HyperModel):
 
         """
         hp.Int("dummy", 0, 100)
+
         lookback=hp.Int("lookback",2,7)
         self.insample_size=lookback*self.horizon
         self.outsample_size=self.horizon
@@ -98,36 +99,41 @@ class HyperNBeats(kt.HyperModel):
             nb_blocks_per_stack=hp.Int("nb_blocks_per_stack",min_value=3,max_value=5)
         # print(hidden_layer_units)
 
-        net = NBeatsNet(
-            # stack_types=(NBeatsNet.GENERIC_BLOCK, NBeatsNet.GENERIC_BLOCK),
-            stack_types=stacks,
-            nb_blocks_per_stack=nb_blocks_per_stack,
-            forecast_length=self.outsample_size,
-            backcast_length=self.insample_size,
-            hidden_layer_units=hidden_layer_units,
-            thetas_dim=thetas_dim,
-            share_weights_in_stack=share_weights_in_stack,
-            nb_harmonics=hp.Int("nb_harmonics",min_value=0,max_value=2),
-            use_mase=self.use_mase,
-            mase_frequency=self.frequency
-        )
-        lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(
-            hp.Float("init_lr",min_value=1e-5,max_value=1e-3,sampling="log"),
-            # 1e-3,
-            decay_steps=self.steps // 3,
-            decay_rate=hp.Float("lr_decay_rate",min_value=0.3,max_value=0.8,sampling="linear"),
-            # decay_rate=0.5,
-            staircase=True)
-        net.compile(loss=LOSSES[loss_fn], 
-            # optimizer='adam',
+        def _create_model():
+            net = NBeatsNet(
+                # stack_types=(NBeatsNet.GENERIC_BLOCK, NBeatsNet.GENERIC_BLOCK),
+                stack_types=stacks,
+                nb_blocks_per_stack=nb_blocks_per_stack,
+                forecast_length=self.outsample_size,
+                backcast_length=self.insample_size,
+                hidden_layer_units=hidden_layer_units,
+                thetas_dim=thetas_dim,
+                share_weights_in_stack=share_weights_in_stack,
+                nb_harmonics=hp.Int("nb_harmonics",min_value=0,max_value=2),
+                use_mase=self.use_mase,
+                mase_frequency=self.frequency
+            )
             optimizer=tf.keras.optimizers.Adam(
-                # learning_rate=hp.Float("init_lr",min_value=1e-5,max_value=1e-4,sampling="linear"),
-                learning_rate=lr_schedule,
+                learning_rate=tf.keras.optimizers.schedules.ExponentialDecay(
+                    hp.Float("init_lr",min_value=1e-5,max_value=1e-3,sampling="log"),
+                    decay_steps=self.steps // 3,
+                    decay_rate=hp.Float("lr_decay_rate",min_value=0.3,max_value=0.8,sampling="linear"),
+                    staircase=True),
                 clipnorm=1.0,
                 epsilon=1e-8,
                 # clipvalue=0.5
-            ),
-        )
+            )
+            net.compile(loss=LOSSES[loss_fn], optimizer=optimizer)
+
+            return net
+
+        if hp.Boolean("parallel",False):
+            strategy = tf.distribute.MirroredStrategy()
+            print("Number of devices: {}".format(strategy.num_replicas_in_sync))
+            with strategy.scope():
+                net=_create_model()
+        else:
+            net=_create_model()
         return net.models['forecast']
 
     def dataset_for_training(self,hp,x,y):
